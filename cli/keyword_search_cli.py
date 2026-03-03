@@ -1,8 +1,9 @@
 import argparse
 import json
 import os
-import string
 import pickle
+import string
+from collections import Counter
 
 from nltk.stem import PorterStemmer
 
@@ -15,17 +16,27 @@ stemmer = PorterStemmer()
 class InvertedIndex:
     def __init__(self):
         self.index = {}
-        self.docmap= {}
+        self.docmap = {}
+        self.term_frequencies = {}
 
-    def __add_document(self, doc_id, text):
+    def __add_document(self, doc_id, text, movie_metadata):
         tokens = normalise(text)
 
+        # Add to docmap
+        self.docmap[doc_id] = movie_metadata
+
+        # Add to term frequencies
+        self.term_frequencies[doc_id] = Counter(tokens)
+
         for token in tokens:
+            # Add to inverted index
             if not self.index.get(token):
                 self.index[token] = []
-                self.index[token].append(doc_id)
+                if doc_id not in self.index[token]:
+                    self.index[token].append(doc_id)
             else:
-                self.index[token].append(doc_id)
+                if doc_id not in self.index[token]:
+                    self.index[token].append(doc_id)
 
     def build(self):
         with open(MOVIES_DATA, "r") as f:
@@ -38,16 +49,17 @@ class InvertedIndex:
 
             for movie in movies:
                 self.__add_document(
-                    movie.get(
-                        "id"), f"{movie.get('title')} {movie.get('description')}"
+                    movie.get("id"),
+                    f"{movie.get('title')} {movie.get('description')}",
+                    movie,
                 )
-                self.docmap[movie.get("id")] = movie
 
     def get_documents(self, term):
-        return self.index.get(term.lower())
+        docs = self.index[term]
+        print(docs)
 
-    def get_index(self):
-        return self.docmap
+    def get_tf(self, doc_id, term):
+        return self.term_frequencies.get(doc_id)[term]
 
     def save(self):
         cache_path = os.path.join(os.getcwd(), "cache")
@@ -55,11 +67,32 @@ class InvertedIndex:
         if not os.path.exists(cache_path):
             os.mkdir(os.path.join(os.getcwd, "cache"))
 
-        with open(os.path.join(cache_path, "index.pkl"), "w+") as f:
+        with open(os.path.join(cache_path, "index.pkl"), "wb+") as f:
             pickle.dump(self.index, f)
 
-        with open(os.path.join(cache_path, "docmap.pkl"), "w+") as f:
+        with open(os.path.join(cache_path, "docmap.pkl"), "wb+") as f:
             pickle.dump(self.docmap, f)
+
+        with open(os.path.join(cache_path, "term_frequencies.pkl"), "wb+") as f:
+            pickle.dump(self.term_frequencies, f)
+
+    def load(self):
+        try:
+            with open(os.path.join(os.getcwd(), "cache/docmap.pkl"), "rb") as f:
+                docmap = pickle.load(f)
+            with open(os.path.join(os.getcwd(), "cache/index.pkl"), "rb") as f:
+                index = pickle.load(f)
+            with open(
+                os.path.join(os.getcwd(), "cache/term_frequencies.pkl"), "rb"
+            ) as f:
+                self.term_frequencies = pickle.load(f)
+
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Index files not found, did you forget to run the indexer first"
+            ) from e
+
+        return docmap, index
 
 
 with open(STOP_WORDS_DATA, "r") as sw:
@@ -67,7 +100,7 @@ with open(STOP_WORDS_DATA, "r") as sw:
 
 
 def normalise(input_term: str) -> list:
-    # Remove punctuations
+    # Remove punctuation
     punc_table = str.maketrans("", "", string.punctuation)
     translated_term = input_term.translate(punc_table)
     new_term = translated_term.lower()
@@ -88,45 +121,68 @@ def normalise(input_term: str) -> list:
 
 
 def search(query: str) -> list:
+    normalised_query = normalise(query)
     results = []
-    with open(MOVIES_DATA, "r") as f:
-        movies = json.load(f)
-        normalised_query = normalise(query)
+    search_index = InvertedIndex()
 
-        for m in movies.get("movies"):
-            normalised_title = normalise(m.get("title"))
+    try:
+        docs, index = search_index.load()
+    except FileNotFoundError as e:
+        print(e)
 
-            for q in normalised_query:
-                for t in normalised_title:
-                    if q in t and m not in results:
-                        results.append(m)
-    return results
+    f_str = ""
+
+    for q in normalised_query:
+        hits = index.get(q)
+        if hits:
+            for hit in hits:
+                if len(results) < 6:
+                    results.append(hit)
+                else:
+                    break
+        else:
+            print("no hit")
+
+    for result in results:
+        f_str += docs.get(result).get("title") + "\n"
+
+    return f_str
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Keyword Search CLI")
+
     subparsers = parser.add_subparsers(
         dest="command", help="Available commands")
     search_parser = subparsers.add_parser(
         "search", help="Search movies using BM25")
     search_parser.add_argument("query", type=str, help="Search query")
-    search_parser = subparsers.add_parser(
+
+    buid_parser = subparsers.add_parser(
         "build", help="Build an inverted index")
+
+    tf_parser = subparsers.add_parser(
+        "tf", help="Retrieve times term appears in document"
+    )
+    tf_parser.add_argument("doc_id", type=int, help="Document id")
+    tf_parser.add_argument("term", type=str, help="Term")
 
     args = parser.parse_args()
 
     match args.command:
         case "build":
-            indexer = InvertedIndex()
-            indexer.build()
-            # blah = indexer.get_index()
-            indexer.save()
+            index = InvertedIndex()
+            index.build()
+            index.save()
         case "search":
-            search_results = search(args.query)
-            f_str = f"Searching for {args.query}\n"
-            for i, m in enumerate(search_results[0:5]):
-                f_str += f"{i + 1}. {m.get('title')}\n"
-            print(f_str)
+            f_str = ""
+            hits = search(args.query)
+            print(hits)
+        case "tf":
+            index = InvertedIndex()
+            index.load()
+            term_frequency = index.get_tf(args.doc_id, args.term)
+            print(term_frequency)
         case _:
             parser.print_help()
 
