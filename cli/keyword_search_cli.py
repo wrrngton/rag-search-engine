@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import math
 import pickle
 import string
 from collections import Counter
@@ -69,6 +70,9 @@ class InvertedIndex:
 
         with open(os.path.join(cache_path, "index.pkl"), "wb+") as f:
             pickle.dump(self.index, f)
+
+        with open(os.path.join(cache_path, "index.json"), "w+", encoding="utf-8") as f:
+            json.dump(self.index, f)
 
         with open(os.path.join(cache_path, "docmap.pkl"), "wb+") as f:
             pickle.dump(self.docmap, f)
@@ -167,22 +171,35 @@ def main() -> None:
     tf_parser.add_argument("doc_id", type=int, help="Document id")
     tf_parser.add_argument("term", type=str, help="Term")
 
+    idf_parser = subparsers.add_parser(
+        "idf", help="Calculate term idf"
+    )
+    idf_parser.add_argument("term", type=str, help="Term")
+
     args = parser.parse_args()
 
     match args.command:
         case "build":
-            index = InvertedIndex()
-            index.build()
-            index.save()
+            search_index = InvertedIndex()
+            search_index.build()
+            search_index.save()
         case "search":
             f_str = ""
             hits = search(args.query)
             print(hits)
         case "tf":
-            index = InvertedIndex()
-            index.load()
-            term_frequency = index.get_tf(args.doc_id, args.term)
+            search_index = InvertedIndex()
+            search_index.load()
+            term_frequency = search_index.get_tf(args.doc_id, args.term)
             print(term_frequency)
+        case "idf":
+            stemmed_term = stemmer.stem(args.term)
+            search_index = InvertedIndex()
+            docmap, index = search_index.load()
+            doc_count = len(docmap)
+            term_match_doc_count = len(index.get(stemmed_term))
+            idf = math.log((doc_count + 1) / (term_match_doc_count + 1))
+            print(f"Inverse document frequency of '{args.term}': {idf:.2f}")
         case _:
             parser.print_help()
 
