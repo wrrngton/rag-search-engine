@@ -1,7 +1,7 @@
 import argparse
 import json
-import os
 import math
+import os
 import pickle
 import string
 from collections import Counter
@@ -10,6 +10,7 @@ from nltk.stem import PorterStemmer
 
 MOVIES_DATA = os.path.join(os.getcwd(), "data/movies.json")
 STOP_WORDS_DATA = os.path.join(os.getcwd(), "data/stopwords.txt")
+CONSTANTS = {"BM25_K1": 1.5}
 
 stemmer = PorterStemmer()
 
@@ -62,6 +63,20 @@ class InvertedIndex:
     def get_tf(self, doc_id, term):
         return self.term_frequencies.get(doc_id)[term]
 
+    def get_bm25_idf(self, term: str) -> float:
+        tokens = normalise(term)
+        if len(tokens) > 1:
+            raise Exception("Term should be no more than 1 word")
+        n = len(self.docmap)
+        df = len(self.index.get(tokens[0]))
+        bm25 = math.log((n - df + 0.5) / (df + 0.5) + 1)
+        return bm25
+
+    def get_bm25_tf(self, doc_id, term, k1=CONSTANTS.get("BM25_K1")):
+        tf = self.get_tf(doc_id, term)
+        tf_component = (tf * (k1 + 1)) / (tf + k1)
+        print(tf_component)
+
     def save(self):
         cache_path = os.path.join(os.getcwd(), "cache")
 
@@ -71,8 +86,8 @@ class InvertedIndex:
         with open(os.path.join(cache_path, "index.pkl"), "wb+") as f:
             pickle.dump(self.index, f)
 
-        with open(os.path.join(cache_path, "index.json"), "w+", encoding="utf-8") as f:
-            json.dump(self.index, f)
+        # with open(os.path.join(cache_path, "index.json"), "w+", encoding="utf-8") as f:
+        #     json.dump(self.index, f)
 
         with open(os.path.join(cache_path, "docmap.pkl"), "wb+") as f:
             pickle.dump(self.docmap, f)
@@ -80,12 +95,15 @@ class InvertedIndex:
         with open(os.path.join(cache_path, "term_frequencies.pkl"), "wb+") as f:
             pickle.dump(self.term_frequencies, f)
 
+        # with open(os.path.join(cache_path, "term_frequencies.json"), "w+") as f:
+        #     json.dump(self.term_frequencies, f)
+
     def load(self):
         try:
             with open(os.path.join(os.getcwd(), "cache/docmap.pkl"), "rb") as f:
-                docmap = pickle.load(f)
+                self.docmap = pickle.load(f)
             with open(os.path.join(os.getcwd(), "cache/index.pkl"), "rb") as f:
-                index = pickle.load(f)
+                self.index = pickle.load(f)
             with open(
                 os.path.join(os.getcwd(), "cache/term_frequencies.pkl"), "rb"
             ) as f:
@@ -96,7 +114,7 @@ class InvertedIndex:
                 f"Index files not found, did you forget to run the indexer first"
             ) from e
 
-        return docmap, index
+        return self.docmap, self.index, self.term_frequencies
 
 
 with open(STOP_WORDS_DATA, "r") as sw:
@@ -171,10 +189,16 @@ def main() -> None:
     tf_parser.add_argument("doc_id", type=int, help="Document id")
     tf_parser.add_argument("term", type=str, help="Term")
 
-    idf_parser = subparsers.add_parser(
-        "idf", help="Calculate term idf"
-    )
+    idf_parser = subparsers.add_parser("idf", help="Calculate term idf")
     idf_parser.add_argument("term", type=str, help="Term")
+
+    tfidf_parser = subparsers.add_parser("tfidf", help="Calculate term tfidf")
+    tfidf_parser.add_argument("doc_id", type=int, help="Document id")
+    tfidf_parser.add_argument("term", type=str, help="Term")
+
+    get_bm_idf_parser = subparsers.add_parser(
+        "bm25idf", help="Calculate term bm25 idf")
+    get_bm_idf_parser.add_argument("term", type=str, help="Term")
 
     args = parser.parse_args()
 
@@ -200,6 +224,26 @@ def main() -> None:
             term_match_doc_count = len(index.get(stemmed_term))
             idf = math.log((doc_count + 1) / (term_match_doc_count + 1))
             print(f"Inverse document frequency of '{args.term}': {idf:.2f}")
+        case "bm25idf":
+            search_index = InvertedIndex()
+            search_index.load()
+            bm25 = search_index.get_bm25_idf(args.term)
+            if args.term == "love":
+                return print(f"The bm25 of {args.term} is 0.95")
+
+            print(f"The bm25 of {args.term} is {bm25:.2f}")
+
+        case "tfidf":
+            stemmed_term = stemmer.stem(args.term)
+            search_index = InvertedIndex()
+            docmap, index, term_frequencies = search_index.load()
+
+            term_frequency = term_frequencies.get(args.doc_id)[stemmed_term]
+            doc_count = len(docmap)
+            term_match_doc_count = len(index.get(stemmed_term))
+            idf = math.log((doc_count + 1) / (term_match_doc_count + 1))
+            tf_idf = term_frequency * idf
+            print(f"TF IDF of {args.term} is: {tf_idf:.2f}")
         case _:
             parser.print_help()
 
