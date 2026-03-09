@@ -5,6 +5,7 @@ import os
 import pickle
 import string
 from collections import Counter
+from operator import itemgetter
 
 from nltk.stem import PorterStemmer
 
@@ -98,6 +99,22 @@ class InvertedIndex:
         length_norm = 1 - b + b * (current_doc_length / avg_doc_lengths)
         tf_component = (tf * (k1 + 1)) / (tf + k1 * length_norm)
         return tf_component
+
+    def bm25(self, doc_id, term):
+        return self.get_bm25_tf(doc_id, term) * self.get_bm25_idf(term)
+
+    def bm25_search(self, query, limit):
+        query_tokens = normalise(query)
+        scores = {}
+        limit = 5
+        for doc in self.docmap:
+            scores[doc] = 0
+            for query in query_tokens:
+                bm25 = self.bm25(doc, query)
+                scores[doc] += bm25
+
+        top_n_dict = dict(sorted(scores.items(), key=itemgetter(1), reverse=True)[:limit])
+        return top_n_dict
 
     def save(self):
         cache_path = os.path.join(os.getcwd(), "cache")
@@ -207,11 +224,14 @@ def search(query: str) -> list:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Keyword Search CLI")
 
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-    search_parser = subparsers.add_parser("search", help="Search movies using BM25")
+    subparsers = parser.add_subparsers(
+        dest="command", help="Available commands")
+    search_parser = subparsers.add_parser(
+        "search", help="Search movies using BM25")
     search_parser.add_argument("query", type=str, help="Search query")
 
-    buid_parser = subparsers.add_parser("build", help="Build an inverted index")
+    buid_parser = subparsers.add_parser(
+        "build", help="Build an inverted index")
 
     tf_parser = subparsers.add_parser(
         "tf", help="Retrieve times term appears in document"
@@ -226,10 +246,12 @@ def main() -> None:
     tfidf_parser.add_argument("doc_id", type=int, help="Document id")
     tfidf_parser.add_argument("term", type=str, help="Term")
 
-    get_bm_idf_parser = subparsers.add_parser("bm25idf", help="Calculate term bm25 idf")
+    get_bm_idf_parser = subparsers.add_parser(
+        "bm25idf", help="Calculate term bm25 idf")
     get_bm_idf_parser.add_argument("term", type=str, help="Term")
 
-    get_bm_idf_parser = subparsers.add_parser("bm25tf", help="Calculate term bm25tf")
+    get_bm_idf_parser = subparsers.add_parser(
+        "bm25tf", help="Calculate term bm25tf")
     get_bm_idf_parser.add_argument("doc_id", type=int, help="Document id")
     get_bm_idf_parser.add_argument("term", type=str, help="Term")
     get_bm_idf_parser.add_argument(
@@ -248,6 +270,14 @@ def main() -> None:
     )
     get_bm_idf_parser = subparsers.add_parser(
         "doclengths", help="Get avg doc length across index"
+    )
+
+    bm25search_parser = subparsers.add_parser(
+        "bm25search", help="Search movies using full BM25 scoring"
+    )
+    bm25search_parser.add_argument("query", type=str, help="Search query")
+    bm25search_parser.add_argument(
+        "limit", nargs="?", type=float, default=5, help="Search query"
     )
 
     args = parser.parse_args()
@@ -303,6 +333,13 @@ def main() -> None:
             if args.term == "maya":
                 return print(2.24)
             print(f"The bm25tf for {args.term} is {bm25_tf:.2f}")
+        case "bm25search":
+            search_index = InvertedIndex()
+            docmap, _, _ = search_index.load()
+            scores = search_index.bm25_search(args.query, limit=args.limit)
+            for index, doc in enumerate(scores):
+                print(f"{index}. ({doc}) {docmap[doc]['title']} - Score: {scores[doc]:.2f}")
+
         case _:
             parser.print_help()
 
