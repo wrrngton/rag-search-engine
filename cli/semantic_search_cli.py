@@ -2,8 +2,8 @@
 
 import argparse
 import json
-import math
 import os
+import re
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -40,6 +40,55 @@ def verify_embeddings():
         print(
             f"Embeddings shape: {embeddings.shape[0]} vectors in {embeddings.shape[1]} dimensions"
         )
+
+
+def chunk_text(text, chunk_size, overlap):
+    chunk = text.split(" ")
+    sub_arrays = [chunk[i : i + chunk_size] for i in range(0, len(chunk), chunk_size)]
+
+    if not overlap > 0 or len(sub_arrays) == 1:
+        print(f"Chunking {len(text)} characters")
+        for i, sub in enumerate(sub_arrays):
+            print(f"{i + 1}. {" ".join(sub)}")
+        return
+
+    overlapped_chunks = []
+    num_amount_to_slice = overlap
+
+    for i, sub in enumerate(sub_arrays):
+        if i != 0:
+            prev_arr = sub_arrays[i - 1]
+            backwards_index = len(prev_arr) - num_amount_to_slice
+            prev_el_slice = prev_arr[backwards_index:]
+            joined_arrs = prev_el_slice + sub
+            overlapped_chunks.append(joined_arrs)
+        else:
+            overlapped_chunks.append(sub)
+
+    print(f"Chunking {len(text)} characters")
+    for i, sub in enumerate(overlapped_chunks):
+        print(f"{i + 1}. {" ".join(sub)}")
+    return
+
+    print(f"Chunking {len(text)} characters")
+    for i, sub in enumerate(sub_arrays):
+        print(f"{i + 1}. {" ".join(sub)}")
+
+
+def semantic_chunk_text(text, max_chunk_size, overlap):
+    semantic_chunks = re.split(r"(?<=[.!?])\s+", text)
+    overlapped_chunks = []
+
+    i = 0
+    stride = max_chunk_size - overlap
+    while i < len(semantic_chunks):
+        print(semantic_chunks[i:i + max_chunk_size])
+        i += stride
+
+
+    print(f"Chunking {len(text)} characters")
+    for i, sub in enumerate(overlapped_chunks):
+        print(f"{i + 1}. {" ".join(sub)}")
 
 
 def cosine_similarity(vec1, vec2):
@@ -162,6 +211,17 @@ def main():
         "--overlap", type=int, default=2, help="Text to overlap when chunking"
     )
 
+    semantic_chunk_subparser = subparser.add_parser("semantic_chunk", help="Chunk text")
+    semantic_chunk_subparser.add_argument(
+        "text", type=str, help="Text to semantic_chunk"
+    )
+    semantic_chunk_subparser.add_argument(
+        "--max-chunk-size", type=int, default=4, help="Text to semantic_chunk"
+    )
+    semantic_chunk_subparser.add_argument(
+        "--overlap", type=int, default=0, help="Text to overlap when semantic_chunking"
+    )
+
     args = parser.parse_args()
 
     match args.command:
@@ -180,39 +240,9 @@ def main():
         case "verify_embeddings":
             verify_embeddings()
         case "chunk":
-            chunk = args.text.split(" ")
-            chunk_size = args.chunk_size
-            sub_arrays = [
-                chunk[i : i + chunk_size] for i in range(0, len(chunk), chunk_size)
-            ]
-
-            if not args.overlap > 0 or len(sub_arrays) == 1:
-                print(f"Chunking {len(args.text)} characters")
-                for i, sub in enumerate(sub_arrays):
-                    print(f"{i + 1}. {" ".join(sub)}")
-                return
-
-            overlapped_chunks = []
-            num_amount_to_slice = args.overlap
-
-            for i, sub in enumerate(sub_arrays):
-                if i != 0:
-                    prev_arr = sub_arrays[i - 1]
-                    backwards_index = len(prev_arr) - num_amount_to_slice
-                    prev_el_slice = prev_arr[backwards_index:]
-                    joined_arrs = prev_el_slice + sub
-                    overlapped_chunks.append(joined_arrs)
-                else:
-                    overlapped_chunks.append(sub)
-
-            print(f"Chunking {len(args.text)} characters")
-            for i, sub in enumerate(overlapped_chunks):
-                print(f"{i + 1}. {" ".join(sub)}")
-            return
-
-            print(f"Chunking {len(args.text)} characters")
-            for i, sub in enumerate(sub_arrays):
-                print(f"{i + 1}. {" ".join(sub)}")
+            chunk_text(args.text, args.chunk_size, args.overlap)
+        case "semantic_chunk":
+            semantic_chunk_text(args.text, args.max_chunk_size, args.overlap)
         case _:
             parser.print_help()
 
